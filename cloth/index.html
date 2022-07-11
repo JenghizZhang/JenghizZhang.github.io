@@ -1,0 +1,474 @@
+ <!DOCTYPE html>
+
+<html>
+
+<head>
+
+<meta charset="UTF-8">
+<title>3D Cloth</title>
+
+<script src='Abubu.js' type='text/javascript'></script>
+<script src='shaders.js' type='text/javascript'></script>
+<script >
+	class CameraMatrixController {
+		static keyWDown = false;
+		static keyADown = false;
+		static keySDown = false;
+		static keyDDown = false;
+		static keyShiftDown = false;
+		static keySpaceDown = false;
+		static flyToggle = false;
+
+		static mouseDiffX = 0.0;
+		static mouseDiffY = 0.0;
+
+		static canvas; 
+
+		constructor(options={}) {
+
+			this.flySpeed = Abubu.readOption(options.flySpeed, 1.0);
+			this.rotateSpeed = Abubu.readOption(options.rotateSpeed, 0.01);
+
+			this.position = Abubu.readOption(options.position, [30.0, 20.0, 80.0]);
+			// this.rotation = Abubu.readOption(options.rotation, [0.0, -0.25*3.14159]);
+			this.rotation = Abubu.readOption(options.rotation, [0.0, .0]);
+
+			this.fieldOfView = Abubu.readOption(options.fieldOfView, Math.PI/2.0);
+			this.aspectRatio = Abubu.readOption(options.aspectRatio, 1.0);
+			this.nearZClip = Abubu.readOption(options.nearZClip, 0.5);
+			this.farZClip = Abubu.readOption(options.farZClip, 150.0);
+
+			this.perspectiveMatrix = mat4.create();
+			mat4.perspective(this.perspectiveMatrix, this.fieldOfView,
+							this.aspectRatio, this.nearZClip, this.farZClip);
+		}
+
+		static addListeners(canvas) {
+			CameraMatrixController.canvas = canvas;
+
+			document.addEventListener('keydown', CameraMatrixController.keyDownHandler, false);
+			document.addEventListener('keyup', CameraMatrixController.keyUpHandler, false);
+			document.addEventListener('mousemove', CameraMatrixController.mouseHandler, false);
+
+
+			canvas.requestPointerLock = canvas.requestPointerLock ||
+										canvas.mozRequestPointerLock ||
+										canvas.webkitRequestPointerLock;
+
+			document.exitPointerLock = document.exitPointerLock ||
+									document.mozExitPointerLock ||
+									document.webkitExitPointerLock;
+
+			document.addEventListener('pointerlockchange',
+									CameraMatrixController.pointerLockHandler, false);
+			document.addEventListener('mozpointerlockchange', 
+									CameraMatrixController.pointerLockHandler, false);
+			document.addEventListener('webkitpointerlockchange',
+									CameraMatrixController.pointerLockHandler, false);
+		}
+
+		static pointerLockHandler(event) {
+			if (!(document.pointerLockElement === CameraMatrixController.canvas ||
+				document.mozPointerLockElement === CameraMatrixController.canvas ||
+				document.webkitPointerLockElement === CameraMatrixController.canvas)) {
+				// Pointer was just unlocked
+				CameraMatrixController.flyToggle = false;
+			}
+		}
+
+		static keyDownHandler(event) {
+			switch (event.keyCode) {
+			case 87:
+				CameraMatrixController.keyWDown = true;
+				break;
+			case 65:
+				CameraMatrixController.keyADown = true; 
+				break;
+			case 83:
+				CameraMatrixController.keySDown = true; 
+				break;
+			case 68:
+				CameraMatrixController.keyDDown = true;
+				break;
+			case 16:
+				CameraMatrixController.keyShiftDown = true;
+				break;
+			case 32:
+				CameraMatrixController.keySpaceDown = true;
+				break;
+			case 70:
+				CameraMatrixController.flyToggle = !CameraMatrixController.flyToggle;
+				if (CameraMatrixController.flyToggle) {
+					CameraMatrixController.canvas.requestPointerLock();
+				} else {
+					document.exitPointerLock();
+				}
+
+				CameraMatrixController.mouseDiffX = 0.0;
+				CameraMatrixController.mouseDiffY = 0.0;
+				break;
+			default:
+			}
+		}
+
+		static keyUpHandler(event) {
+			switch (event.keyCode) {
+			case 87:
+				CameraMatrixController.keyWDown = false
+				break;
+			case 65:
+				CameraMatrixController.keyADown = false; 
+				break;
+			case 83:
+				CameraMatrixController.keySDown = false; 
+				break;
+			case 68:
+				CameraMatrixController.keyDDown = false;
+				break;
+			case 16:
+				CameraMatrixController.keyShiftDown = false;
+				break;
+			case 32:
+				CameraMatrixController.keySpaceDown = false;
+				break;
+			default:
+			}
+		}
+
+		static mouseHandler(event) {
+			CameraMatrixController.mouseDiffX += event.movementX;
+			CameraMatrixController.mouseDiffY += event.movementY;
+		}
+
+		updateCameraMatrix() {
+			if (CameraMatrixController.flyToggle) {
+				this.rotation[0] -= CameraMatrixController.mouseDiffY*this.rotateSpeed;
+				this.rotation[1] -= CameraMatrixController.mouseDiffX*this.rotateSpeed;
+
+				CameraMatrixController.mouseDiffX = 0.0;
+				CameraMatrixController.mouseDiffY = 0.0;
+
+				var forwards = [0.0, 0.0, -this.flySpeed];
+				vec3.rotateY(forwards, forwards, [0.0, 0.0, 0.0], this.rotation[1]);
+				var right = vec3.clone(forwards);
+				right[0] = -forwards[2];
+				right[2] = forwards[0]; 
+
+				if (CameraMatrixController.keyWDown) vec3.add(this.position, this.position, forwards);
+				if (CameraMatrixController.keySDown) vec3.scaleAndAdd(this.position, this.position, forwards, -1.0);
+				if (CameraMatrixController.keyDDown) vec3.add(this.position, this.position, right);
+				if (CameraMatrixController.keyADown) vec3.scaleAndAdd(this.position, this.position, right, -1.0);
+				if (CameraMatrixController.keyShiftDown) vec3.add(this.position, this.position, [0.0, -this.flySpeed, 0.0]);
+				if (CameraMatrixController.keySpaceDown) vec3.add(this.position, this.position, [0.0, this.flySpeed, 0.0]);
+
+			}
+		}
+
+		getCameraMatrix() {
+			var cameraMatrix = mat4.clone(this.perspectiveMatrix);
+			var rotationInv = [-this.rotation[0], -this.rotation[1]];
+			var positionInv = [-this.position[0], -this.position[1], -this.position[2]];
+			mat4.rotateX(cameraMatrix, cameraMatrix, rotationInv[0]);
+			mat4.rotateY(cameraMatrix, cameraMatrix, rotationInv[1]);
+			mat4.translate(cameraMatrix, cameraMatrix, positionInv)
+			return cameraMatrix;
+		}
+	}
+
+	class Cloth {
+		constructor(options={}) {
+
+		}
+	}
+	function genClothGridPoints(width, height, scale=1) {
+		var clothPoints = new Array(3*width*height);
+
+		for (var y = 0; y < height; y++) {
+			for (var x = 0; x < width; x++) {
+				var idx = 3*(width*y + x);
+				clothPoints[idx] = scale*(x + 0.5);
+				clothPoints[idx + 1] = scale*(height - y - 0.5);
+				clothPoints[idx + 2] = 0.0;
+			}
+		}
+		return clothPoints;
+	}
+
+	// Generates the set of points needed to define the WebGL geometry
+	// as a gl_TRIANGLE_STRIP
+	//
+	// width:        the width of the generated grid
+	// height:       the height of the generated grid
+	// vertexPoints: the grid points generated by genGridPoints
+	// 
+	// returns the set of verticies as a gl_TRIANGLE_STRIP that define the cloth surface 
+	function genClothGeometryPoints(width, height, vertexPoints) {
+		var clothPoints = new Array(3*(height - 1)*(2*width + 2));
+
+		for (var y = 0; y < height - 1; y++) {
+			var clothPointsIdx0 = 3*(y*(2*width + 2));
+			var vertPointsIdx0 = 3*width*y; 
+			clothPoints[clothPointsIdx0] = vertexPoints[vertPointsIdx0];
+			clothPoints[clothPointsIdx0 + 1] = vertexPoints[vertPointsIdx0 + 1];
+			clothPoints[clothPointsIdx0 + 2] = vertexPoints[vertPointsIdx0 + 2];
+
+			for (var x = 0; x < width; x++) {
+				var clothPointsIdx = 3*(y*(2*width + 2) + 2*x + 1);
+				var vertPointsIdx = 3*(width*y + x);
+				clothPoints[clothPointsIdx] = vertexPoints[vertPointsIdx];
+				clothPoints[clothPointsIdx + 1] = vertexPoints[vertPointsIdx + 1];
+				clothPoints[clothPointsIdx + 2] = vertexPoints[vertPointsIdx + 2];
+
+				var vertPointsNextRowIdx = 3*(width*(y + 1) + x);
+				clothPoints[clothPointsIdx + 3] = vertexPoints[vertPointsNextRowIdx];
+				clothPoints[clothPointsIdx + 4] = vertexPoints[vertPointsNextRowIdx + 1];
+				clothPoints[clothPointsIdx + 5] = vertexPoints[vertPointsNextRowIdx + 2];
+			}
+
+			var clothPointsIdxLast = 3*(y*(2*width + 2) + 2*width + 1);
+			var vertPointsIdxLast = 3*(width*(y + 1) + width - 1);
+			clothPoints[clothPointsIdxLast] = vertexPoints[vertPointsIdxLast];
+			clothPoints[clothPointsIdxLast + 1] = vertexPoints[vertPointsIdxLast + 1];
+			clothPoints[clothPointsIdxLast + 2] = vertexPoints[vertPointsIdxLast + 2];
+		}
+
+		return clothPoints;
+	}
+
+	// Helper function to print the verticies stored at each index of an array
+	//
+	// array: the array to print
+	function printVertexArray(array) {
+		for (var i = 0; i < array.length; i = i + 3) {
+			console.log("(".concat(array[i], " ",
+								array[i + 1], " ",
+								array[i + 2], ") vertex number = ", i/3));
+		}
+	}
+
+	function print4x4Array(array) {
+		for (var i = 0; i < array.length; i = i + 4) {
+			console.log("(".concat(array[i], " ",
+								array[i + 1], " ",
+								array[i + 2], " ",
+								array[i + 3], "), row ", i/4));
+		}
+	}
+
+
+</script>
+
+</head>
+
+<body>
+    <div><a href="../index.html">go back to home page</a></div>
+	<p>you can press f to control the view port, and press w, a, s, d, space, shift to move</p>
+
+<canvas  id="main-canvas" 
+         width=900 height=900
+         style="border:1px solid #000000;" >
+   <!-- This message is displayed if canvas is not available -->
+   Your browser does not support the HTML5 canvas tag.
+</canvas>
+
+<script>
+
+	var modelParams = {
+
+		clothWidth : 60,
+		clothHeight : 60,
+		clothScale : 1.0,
+
+		displayWidth:  900,
+		displayHeight: 900,
+
+
+		timestep : 0.01,
+		renderInterval : 200,
+
+		k_sheer : 4.0,
+		k_tension : 4.0,
+		k_fold : 4.0,
+
+		d_sheer : 3.0,
+		d_tension : 3.0,
+		d_fold : 3.0,
+
+		point_mass : 1,
+		gravity : -0.01
+
+	}
+
+	var mainCanvas = document.getElementById('main-canvas');
+	mainCanvas.width = modelParams.displayWidth;
+	mainCanvas.height = modelParams.displayHeight;
+
+	var camera = new CameraMatrixController();
+	CameraMatrixController.addListeners(mainCanvas);
+
+	var vertexPoints = genClothGridPoints(modelParams.clothWidth,
+										  modelParams.clothHeight,
+										  modelParams.scale);
+	var geometryPoints = genClothGeometryPoints(modelParams.clothWidth,
+												modelParams.clothHeight,
+												vertexPoints);
+
+	var init_positions = new Float32Array(4*modelParams.clothWidth*modelParams.clothHeight);
+	var init_velocities = new Float32Array(4*modelParams.clothWidth*modelParams.clothHeight);
+	var init_forces = new Float32Array(4*modelParams.clothWidth*modelParams.clothHeight);
+
+	var e_positions = new Abubu.Float32Texture(modelParams.clothWidth,
+									   		   modelParams.clothHeight,
+									   		   {data: init_positions});
+	var o_positions = new Abubu.Float32Texture(modelParams.clothWidth,
+									   		   modelParams.clothHeight,
+									   		   {data: init_positions});
+	var e_velocities = new Abubu.Float32Texture(modelParams.clothWidth,
+									   			modelParams.clothHeight,
+									   			{data: init_velocities});
+	var o_velocities = new Abubu.Float32Texture(modelParams.clothWidth,
+									   			modelParams.clothHeight,
+									   			{data: init_velocities});
+	var forces = new Abubu.Float32Texture(modelParams.clothWidth,
+										  modelParams.clothHeight,
+										  {data: init_forces});
+
+	var forceUpdater = new Abubu.Solver({
+		vertexShader : passThroughVS,
+		fragmentShader : forceUpdaterFS,
+		uniforms : {
+			positions     : {type: 't', value: e_positions},
+			velocities    : {type: 't', value: e_velocities},
+			gravity       : {type: 'f', value: modelParams.gravity},
+			node_mass     : {type: 'f', value: modelParams.node_mass},
+			k_sheer   	  : {type: 'f', value: modelParams.k_sheer},
+			k_tension 	  : {type: 'f', value: modelParams.k_tension},
+			k_fold    	  : {type: 'f', value: modelParams.k_fold},
+			d_sheer   	  : {type: 'f', value: modelParams.d_sheer},
+			d_tension 	  : {type: 'f', value: modelParams.d_tension},
+			d_fold    	  : {type: 'f', value: modelParams.d_fold},
+
+			clothScale    : {type: 'f', value: modelParams.clothScale},
+			clothWidth    : {type: 'i', value: modelParams.clothWidth},
+			clothHeight   : {type: 'i', value: modelParams.clothHeight},
+			gravity       : {type: 'f', value: modelParams.gravity}
+		},
+		renderTargets : {
+			forces : {location: 0, target: forces}
+		}
+	});
+
+	var pointUpdater = new Abubu.Solver({
+		vertexShader : passThroughVS,
+		fragmentShader : pointUpdaterFS,
+		uniforms : {
+			in_positions  : {type: 't', value: e_positions},
+			in_velocities : {type: 't', value: e_velocities},
+			forces        : {type: 't', value: forces},
+
+			clothWidth    : {type: 'i', value: modelParams.clothWidth},
+			clothHeight   : {type: 'i', value: modelParams.clothHeight},
+			timestep  	  : {type: 'f', value: modelParams.timestep},
+			point_mass    : {type: 'f', value: modelParams.point_mass},
+			time          : {type: 'i', value: 0}
+		},
+		renderTargets : {
+			out_positions  : {location: 0, target: o_positions},
+			out_velocities : {location: 1, target: o_velocities}
+		}
+	});
+
+	var pointPlotter = new Abubu.Solver({
+		vertexShader : plotterVS,
+		fragmentShader : pointPlotterFS,
+		depthTest : true,
+		geometry : {
+			vertices : vertexPoints,
+			noVertices : vertexPoints.length/3,
+			noCoords : 3,
+			premitive : 'points',
+		},
+		uniforms : {
+			cameraMatrix    : {type: 'mat4', value: camera.getCameraMatrix()},
+			positions       : {type: 't', value: o_positions},
+			colors 			: {type: 't', value: forces},
+			width           : {type: 'i', value: modelParams.clothWidth},
+			height          : {type: 'i', value: modelParams.clothHeight},
+			scale			: {type: 'f', value: modelParams.clothScale}
+		},
+		canvas : mainCanvas,
+		clear : false
+	});
+
+	colorMaps = Abubu.getColormaps();
+	var sheetPlotter = new Abubu.Solver({
+		vertexShader : plotterVS,
+		fragmentShader : sheetPlotterFS,
+		depthTest : true,
+		geometry : {
+		    vertices : geometryPoints,
+		    noVertices: geometryPoints.length/3, // No of vertices
+		    noCoords  : 3, // No of coordinates
+		    premitive : 'triangle_strip',
+		},
+		uniforms : {
+			cameraMatrix    : {type: 'mat4', value: camera.getCameraMatrix()},
+			positions       : {type: 't', value: o_positions},
+			width           : {type: 'i', value: modelParams.clothWidth},
+			height          : {type: 'i', value: modelParams.clothHeight},
+
+			scale			: {type: 'f', value: modelParams.clothScale},
+			plotField		: {type: 't', value: forces},
+			colorMap 		: {type: 't', value: colorMaps.parula.texture}
+		},
+		canvas : mainCanvas,
+		clear : true,
+		clearColor : [0.5, 0.5, 0.5, 1.0]
+	});
+	sheetPlotter.setSamplerMinFilter('plotField', 'LINEAR');
+	sheetPlotter.setSamplerMagFilter('plotField', 'LINEAR');
+
+	var timestep = 0;
+	var render = function() {
+		for (var i = 0; i < modelParams.renderInterval; i++) {
+			pointUpdater.setUniform('time', i);
+
+			if (timestep % 2 === 0) {
+				forceUpdater.setUniform('positions', e_positions);
+				forceUpdater.setUniform('velocities', e_velocities);
+
+				pointUpdater.setUniform('in_positions', e_positions);
+				pointUpdater.setUniform('in_velocities', e_velocities);
+				pointUpdater.setRenderTarget('out_positions', o_positions);
+				pointUpdater.setRenderTarget('out_velocities', o_velocities);
+			} else {
+				forceUpdater.setUniform('positions', o_positions);
+				forceUpdater.setUniform('velocities', o_velocities);
+
+				pointUpdater.setUniform('in_positions', o_positions);
+				pointUpdater.setUniform('in_velocities', o_velocities);
+				pointUpdater.setRenderTarget('out_positions', e_positions);
+				pointUpdater.setRenderTarget('out_velocities', e_velocities);
+			}
+
+			forceUpdater.render();
+			pointUpdater.render();
+
+			timestep++;
+		}
+
+		camera.updateCameraMatrix();
+		sheetPlotter.setUniform("cameraMatrix", camera.getCameraMatrix());
+		pointPlotter.setUniform("cameraMatrix", camera.getCameraMatrix());
+
+		sheetPlotter.render();
+		pointPlotter.render();
+
+		requestAnimationFrame(render);
+	}
+	render();
+
+</script>
+
+</body>
+</html>
